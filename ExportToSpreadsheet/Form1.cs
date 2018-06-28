@@ -53,7 +53,7 @@ namespace ExportToSpreadsheet
             oraCmd.Connection = oraConn;
             oraCmd.CommandType = CommandType.Text;
 
-            List<string> lstTRIDs = GetTRIDs(oraCmd);//new List<string>() { "TR128WY17", "TR396QE95" };//
+            List<string> lstTRIDs = new List<string>() { "TR396QE95" };//, "TR128WY17" };//GetTRIDs(oraCmd);//
 
             DataTable dtAnalyteInfo = GetAnalyteInformation(oraCmd, lstTRIDs);
 
@@ -241,38 +241,41 @@ namespace ExportToSpreadsheet
             Stopwatch timer = Stopwatch.StartNew();
             DataSet dataSet = new DataSet();
             DataTable dtWaterInfo = analyteInfoTable;
+            string strSubCommand = string.Empty;
 
-            Dictionary<string, string> dictProdGUIDs = new Dictionary<string, string>() { { "TREATED", "WW-TREATED" }, { "RAW", "WW-RAW" }, { "INCOMING", "WW-INCOMING" }, { "SLUDGE", "WW-SLUDGE" } };
-            foreach (KeyValuePair<string, string> prodGUID in dictProdGUIDs)
+            List<string> lstProdGUIDs = new List<string>() {  "TREATED", "RAW" , "INCOMING","SLUDGE" };
+            foreach (string prodGUID in lstProdGUIDs)
             {
-                dtWaterInfo.Columns.Add(string.Format("RESULT{0}", prodGUID.Key), typeof(string));
-                dtWaterInfo.Columns.Add(string.Format("ABBREVIATION{0}", prodGUID.Key), typeof(string));
-                dtWaterInfo.Columns.Add(string.Format("HASVALUE{0}", prodGUID.Key), typeof(bool));
-                dtWaterInfo.Columns.Add(string.Format("SAMPLETYPEID{0}", prodGUID.Key), typeof(int));
+                dtWaterInfo.Columns.Add(string.Format("RESULT{0}", prodGUID), typeof(string));
+                dtWaterInfo.Columns.Add(string.Format("ABBREVIATION{0}", prodGUID), typeof(string));
+                dtWaterInfo.Columns.Add(string.Format("HASVALUE{0}", prodGUID), typeof(bool));
+                dtWaterInfo.Columns.Add(string.Format("SAMPLETYPEID{0}", prodGUID), typeof(int));
             }
 
             using (OracleDataAdapter oraDataAdapter = new OracleDataAdapter())
             {
                 int ctrAnalyte = 0;
                 InvokeProgBarMax(analyteInfoTable.Rows.Count);
-
+                
                 foreach (DataRow analyteInfo in analyteInfoTable.Rows)
                 {
-                    ctrAnalyte++;
+                    strSubCommand = string.Empty;
                     if (!string.IsNullOrEmpty(analyteInfo["ANALYTEID"].ToString()) && !string.IsNullOrEmpty(analyteInfo["ANALYTETYPEID"].ToString()))
                     {
-                        foreach (KeyValuePair<string, string> prodGUID in dictProdGUIDs)
+                        //int guidctr = 0;
+                        //foreach (string prodGUID in lstProdGUIDs)
+                        for (int guidctr = 0; guidctr < lstProdGUIDs.Count; guidctr++)
                         {
-                            dataSet.Clear();
-                            DataTable dtWtrInfo = new DataTable();
-                            cmd.CommandText = string.Format(@"SELECT
-	                                OSADMIN_PRD2.OSUSR_35O_LABORAT1.RESULT AS RESULT,
-	                                OSADMIN_PRD2.OSUSR_VFG_MEASURE2.ABBREVIATION AS ABBREVIATION,
+                            string prodGUID = lstProdGUIDs[guidctr];
+                            strSubCommand += string.Format(@"(SELECT
+                                    OSADMIN_PRD2.OSUSR_HGM_LABANAL1.TRID,
+	                                OSADMIN_PRD2.OSUSR_35O_LABORAT1.RESULT AS RESULT{0},
+	                                OSADMIN_PRD2.OSUSR_VFG_MEASURE2.ABBREVIATION AS ABBREVIATION{0},
 	                                CASE
 		                                WHEN TRIM(OSADMIN_PRD2.OSUSR_35O_LABORAT1.RESULT) IS NULL THEN 0
 		                                ELSE 1
-	                                END AS HasValue,
-	                                OSADMIN_PRD2.OSUSR_35O_LABORAT3.SAMPLETYPEID AS SAMPLETYPEID
+	                                END AS HasValue{0},
+	                                OSADMIN_PRD2.OSUSR_35O_LABORAT3.SAMPLETYPEID AS SAMPLETYPEID{0}
                                 FROM OSADMIN_PRD2.OSUSR_HGM_LABANAL1
                                 INNER JOIN OSADMIN_PRD2.OSUSR_35O_LABORAT3
                                     ON OSADMIN_PRD2.OSUSR_HGM_LABANAL1.LABANALYSISID = OSADMIN_PRD2.OSUSR_35O_LABORAT3.ID
@@ -284,24 +287,41 @@ namespace ExportToSpreadsheet
                                 AND OSADMIN_PRD2.OSUSR_35O_LABORAT1.ANALYTETYPEID = {2}
                                 AND OSADMIN_PRD2.OSUSR_35O_LABORAT1.ANALYTEID = {3}
                                 AND OSADMIN_PRD2.OSUSR_35O_LABORAT3.TYPEID = 2
-                                AND OSADMIN_PRD2.OSUSR_35O_LABORAT3.PRODUCTGUID = '{4}'", prodGUID.Key, analyteInfo["TRID"], analyteInfo["ANALYTETYPEID"], analyteInfo["ANALYTEID"], prodGUID.Value);
-                            oraDataAdapter.SelectCommand = cmd;
-                            oraDataAdapter.Fill(dataSet);
-                            dtWtrInfo = dataSet.Tables[0];
-                            
-                            if (dtWtrInfo.Rows.Count > 0)
+                                AND OSADMIN_PRD2.OSUSR_35O_LABORAT3.PRODUCTGUID = 'WW-{0}') TBL{0}", prodGUID, analyteInfo["TRID"], analyteInfo["ANALYTETYPEID"], analyteInfo["ANALYTEID"]);
+                            if (guidctr == 0)
                             {
-                                string pguid = prodGUID.Key;
-                                analyteInfo[string.Format("RESULT{0}", pguid)] = dtWtrInfo.Rows[0]["RESULT"];
-                                analyteInfo[string.Format("ABBREVIATION{0}", pguid)] = dtWtrInfo.Rows[0]["ABBREVIATION"];
-                                analyteInfo[string.Format("HASVALUE{0}", pguid)] = dtWtrInfo.Rows[0]["HASVALUE"];
-                                analyteInfo[string.Format("SAMPLETYPEID{0}", pguid)] = dtWtrInfo.Rows[0]["SAMPLETYPEID"];
-                                
-                                this.CustomSetTextLabel("(" + ctrAnalyte.ToString() + "/" + analyteInfoTable.Rows.Count + ") analyte info processed for water info." );
+                                strSubCommand += " LEFT JOIN ";
+                            }
+                            else if (guidctr > 0 && guidctr == lstProdGUIDs.Count - 1)
+                            {
+                                strSubCommand += string.Format(" ON TBL{0}.TRID = TBL{1}.TRID ", lstProdGUIDs[guidctr - 1], prodGUID);
+                            }
+                            else if (guidctr > 0)
+                            {
+                                strSubCommand += string.Format(" ON TBL{0}.TRID = TBL{1}.TRID LEFT JOIN ", lstProdGUIDs[guidctr - 1], prodGUID);
                             }
                         }
-                        InvokeProgBarTick(ctrAnalyte);
+                        DataTable dtWtrInfo = new DataTable();
+                        dataSet.Clear();
+                        cmd.CommandText = string.Format("SELECT * FROM ({0})", strSubCommand);
+                        oraDataAdapter.SelectCommand = cmd;
+                        oraDataAdapter.Fill(dataSet);
+                        dtWtrInfo = dataSet.Tables[0];
+
+                        if (dtWtrInfo.Rows.Count > 0)
+                        {
+                            foreach (string pguid in lstProdGUIDs)
+                            {
+                                analyteInfo[string.Format("RESULT{0}", pguid)] = dtWtrInfo.Rows[0][string.Format("RESULT{0}", pguid)];
+                                analyteInfo[string.Format("ABBREVIATION{0}", pguid)] = dtWtrInfo.Rows[0][string.Format("ABBREVIATION{0}", pguid)];
+                                analyteInfo[string.Format("HASVALUE{0}", pguid)] = dtWtrInfo.Rows[0][string.Format("HASVALUE{0}", pguid)];
+                                analyteInfo[string.Format("SAMPLETYPEID{0}", pguid)] = dtWtrInfo.Rows[0][string.Format("SAMPLETYPEID{0}", pguid)];
+                            }
+                        }
                     }
+                    ctrAnalyte++;
+                    this.CustomSetTextLabel("(" + (ctrAnalyte).ToString() + "/" + analyteInfoTable.Rows.Count + ") analyte info processed for water info.");
+                    InvokeProgBarTick(ctrAnalyte);
                 }
             }
             timer.Stop();
@@ -331,24 +351,3 @@ namespace ExportToSpreadsheet
         }
     }
 }
-
-
-//oraCmd.CommandText = @"SELECT LabAnalysExt.TRID, LabAnalys.LABCONTACTNAME, LabAnalys.LABCONTACTEMAIL, LabAnalys.LABTESTREFNO, LabAnalys.LABREPORTFILENAME,
-//                    LabAnalys.TESTSTARTDATE, LabAnalys.TESTENDDATE, WtrDataStat.LABEL WATERDATASTATUS, LabAnalysExt.EFFLUENTTREATMENTPLANT,
-//                    LabAnalysRes.ANALYTETYPEID, LabAnalysRes.ANALYTEID, LabAnalysResExt.HASSPECIALMEASUREMENT, LabAnalysRes.LABORATORYANALYSISID,
-//                    LabAnalysRes.RESULT, Meas.NAME UNITOFMEASURE, AnlytType.LABEL ANALYTETYPE, AnlytCateg.NAME CategoryName, SpclMeas.LABEL SpecialMeasurement
-//                    FROM OSADMIN_PRD2.OSUSR_35O_LABORAT3 LabAnalys
-//                    LEFT OUTER JOIN OSADMIN_PRD2.OSUSR_XCQ_ORGANIZA Org ON LabAnalys.ORGANIZATIONGUID = Org.GUID
-//                    LEFT OUTER JOIN OSADMIN_PRD2.OSUSR_HGM_LABANAL1 LabAnalysExt ON LabAnalys.ID = LabAnalysExt.LABANALYSISID
-//                    LEFT OUTER JOIN OSADMIN_PRD2.OSUSR_HGM_WATERDA1 WtrDschrge ON LabAnalysExt.DISCHARGETYPEID = WtrDschrge.ID
-//                    LEFT OUTER JOIN OSADMIN_PRD2.OSUSR_HGM_WATERDA3 WtrDataStat ON LabAnalysExt.WATERDATASTATUSID = WtrDataStat.ID
-//                    LEFT OUTER JOIN OSADMIN_PRD2.OSUSR_35O_LABORAT1 LabAnalysRes ON LabAnalys.ID = LabAnalysRes.LABORATORYANALYSISID
-//                    LEFT OUTER JOIN OSADMIN_PRD2.OSUSR_HGM_LABANALY LabAnalysResExt ON LabAnalysRes.ID = LabAnalysResExt.ID
-//                    LEFT OUTER JOIN OSADMIN_PRD2.OSUSR_WKM_ANALYTE1 AnlytSbstnce ON LabAnalysRes.ANALYTEID = AnlytSbstnce.ID
-//                    LEFT OUTER JOIN OSADMIN_PRD2.OSUSR_35O_ANALYTET AnlytType ON LabAnalysRes.ANALYTETYPEID = AnlytType.ID
-//                    LEFT OUTER JOIN OSADMIN_PRD2.OSUSR_WKM_ANALYTEC AnlytCateg ON AnlytSbstnce.ANALYTECATEGORYID = AnlytCateg.ID
-//                    LEFT OUTER JOIN OSADMIN_PRD2.OSUSR_VFG_MEASURE2 Meas ON LabAnalysRes.UNITID = Meas.ID
-//                    LEFT OUTER JOIN OSADMIN_PRD2.OSUSR_HGM_SPECIALM SpclMeas ON LabAnalysResExt.SPECIALMEASUREMENTID = SpclMeas.ID
-//                    LEFT OUTER JOIN OSADMIN_PRD2.OSUSR_WKM_STANDARD StdTestMthd ON LabAnalysResExt.STANDARDTESTMETHODID = StdTestMthd.ID
-//                    WHERE LabAnalysExt.ISACTIVE = 1 and rownum >= 1 AND rownum <= 50";
-//oraCmd.CommandType = CommandType.Text;
